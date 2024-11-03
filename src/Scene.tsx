@@ -1,12 +1,16 @@
-import React, { useRef, useState } from "react";
+import React, { useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { TextureLoader } from "three";
 import { useLoader } from "@react-three/fiber";
 import * as THREE from "three";
+// Импорт изображений из папки src/assets
+import bgStaticPNG from './assets/bg-main-min.png';
+import bgPNG from './assets/bg4-min.png';
+import kotPNG from './assets/kot.png';
 
 // Интерфейсы для компонентов
 interface ImageLayerProps {
-  url: string;
+  img: string;
   depth: number;
   positionZ: number;
   fixedToBottomLeft?: boolean;
@@ -14,15 +18,15 @@ interface ImageLayerProps {
 }
 
 interface BackgroundProps {
-  url: string;
+  img: string;
 }
 
 interface StaticBackgroundProps {
-  url: string;
+  img: string;
 }
 
-// Шейдер размытия для StaticBackground
-const StaticBlurShader = {
+// Шейдер для Background с размытие ближе к центру
+const BackgroundBlurShader = {
   uniforms: {
     uTexture: { value: null },
     uMouseDistance: { value: 0.0 },
@@ -48,7 +52,7 @@ const StaticBlurShader = {
 
       for (float x = -4.0; x <= 4.0; x++) {
         for (float y = -4.0; y <= 4.0; y++) {
-          vec2 offset = vec2(x, y) * dist * 0.002;
+          vec2 offset = vec2(x, y) * dist * 0.0025;
           color += texture2D(uTexture, uv + offset);
           total += 1.0;
         }
@@ -58,30 +62,30 @@ const StaticBlurShader = {
   `,
 };
 
-// Шейдер размытия для Background
-const AnimatedBlurShader = {
+// Шейдер для StaticBackground с размытие дальше от центра
+const StaticBackgroundBlurShader = {
   uniforms: {
     uTexture: { value: null },
     uMouseDistance: { value: 0.0 },
     uResolution: { value: new THREE.Vector2(1, 1) },
   },
-  vertexShader: StaticBlurShader.vertexShader,
-  fragmentShader: StaticBlurShader.fragmentShader,
+  vertexShader: BackgroundBlurShader.vertexShader,
+  fragmentShader: BackgroundBlurShader.fragmentShader,
 };
 
-// Статичный фон с управляемым блюром
-const StaticBackground: React.FC<StaticBackgroundProps> = ({ url }) => {
-  const texture = useLoader(TextureLoader, url);
+// StaticBackground компонент с новым условием размытия
+const StaticBackground: React.FC<StaticBackgroundProps> = ({ img }) => {
+  const texture = useLoader(TextureLoader, img);
   const ref = useRef<THREE.Mesh>(null);
   const { viewport, size } = useThree();
 
-  
   useFrame(({ mouse }) => {
     if (ref.current) {
       const material = ref.current.material as THREE.ShaderMaterial;
 
       const distanceFromCenter = Math.sqrt(mouse.x ** 2 + mouse.y ** 2);
-      material.uniforms.uMouseDistance.value = Math.max(0.3 - distanceFromCenter * 0.5, 0);
+      // Увеличенное размытие, если курсор далеко от центра
+      material.uniforms.uMouseDistance.value = Math.max((distanceFromCenter - 0.3) * 0.5, 0);
       material.uniforms.uResolution.value.set(size.width, size.height);
     }
   });
@@ -92,72 +96,91 @@ const StaticBackground: React.FC<StaticBackgroundProps> = ({ url }) => {
       <shaderMaterial
         uniforms-uTexture={{ value: texture }}
         uniforms-uMouseDistance={{ value: 0.0 }}
-        {...StaticBlurShader}
+        {...StaticBackgroundBlurShader}
         transparent
       />
     </mesh>
   );
 };
 
-// Анимированный фон с блюром
-const Background: React.FC<BackgroundProps> = ({ url }) => {
-  const texture = useLoader(TextureLoader, url);
+// Background компонент с размытие ближе к центру
+const Background: React.FC<BackgroundProps> = ({ img }) => {
+  const texture = useLoader(TextureLoader, img);
   const ref = useRef<THREE.Mesh>(null);
   const { viewport, size } = useThree();
+
+  const aspectRatio = texture.image.width / texture.image.height;
+  const width = 2 * viewport.width;
+  const height = 2 * viewport.width / aspectRatio;
+
+  const smoothRotationX = useRef(0);
+  const smoothRotationY = useRef(0);
 
   useFrame(({ mouse }) => {
     if (ref.current) {
       const material = ref.current.material as THREE.ShaderMaterial;
 
-      ref.current.rotation.y = mouse.x * 0.05;
-      ref.current.rotation.x = -mouse.y * 0.02;
+      smoothRotationX.current += (mouse.x * 0.05 - smoothRotationX.current) * 0.1;
+      smoothRotationY.current += (-mouse.y * 0.02 - smoothRotationY.current) * 0.1;
+
+      ref.current.rotation.y = smoothRotationX.current;
+      ref.current.rotation.x = smoothRotationY.current;
 
       const distanceFromCenter = Math.sqrt(mouse.x ** 2 + mouse.y ** 2);
-      material.uniforms.uMouseDistance.value = Math.min(distanceFromCenter * 0.5, 0.3);
+      // Размытие увеличивается при приближении к центру
+      material.uniforms.uMouseDistance.value = Math.max(0.3 - distanceFromCenter * 0.5, 0);
       material.uniforms.uResolution.value.set(size.width, size.height);
     }
   });
 
   return (
     <mesh ref={ref} position={[0, 0, -3]}>
-      <planeGeometry args={[viewport.width * 2.1, viewport.height * 2.1]} />
+      <planeGeometry args={[width, height]} />
       <shaderMaterial
         uniforms-uTexture={{ value: texture }}
         uniforms-uMouseDistance={{ value: 0.0 }}
-        {...AnimatedBlurShader}
+        {...BackgroundBlurShader}
         transparent
       />
     </mesh>
   );
 };
 
-// Компонент ImageLayer для отображения одного слоя изображения
-const ImageLayer: React.FC<ImageLayerProps> = ({ url, depth, positionZ, fixedToBottomLeft = false, opacity = 1 }) => {
-  const texture = useLoader(TextureLoader, url);
+// Компонент ImageLayer для отображения одного слоя изображения с плавностью
+const ImageLayer: React.FC<ImageLayerProps> = ({ img, depth, positionZ, fixedToBottomLeft = false, opacity = 1 }) => {
+  const texture = useLoader(TextureLoader, img);
   const ref = useRef<THREE.Mesh>(null);
   const { viewport } = useThree();
-  const [position] = useState<[number, number]>([0, 0]);
+
+  // Фиксированная позиция компонента в нижнем левом углу
+  const fixedX = -viewport.width / 2 + 1.8;
+  const fixedY = -viewport.height / 2 + 1.5;
+
+  // Плавные значения для вращения и смещения
+  const smoothOffsetX = useRef(0);
+  const smoothOffsetY = useRef(0);
+  const smoothRotationY = useRef(0);
 
   useFrame(({ mouse }) => {
     if (ref.current) {
-      // Если изображение должно быть закреплено в нижнем левом углу
-      if (fixedToBottomLeft) {
-        // Позиция в нижнем левом углу с учетом размера viewport
-        ref.current.position.x = -viewport.width / 2 + 1.8; // Смещение на 2 для отступа
-        ref.current.position.y = -viewport.height / 2 + 1.5; // Смещение на 1.5 для отступа
-      }
+      // Целевое смещение и вращение на основе положения мыши
+      const targetOffsetX = mouse.x * depth * 0.3;
+      const targetOffsetY = mouse.y * depth * 0.3;
+      const targetRotationY = mouse.x * 0.2 * depth;
 
-      // Параллакс-эффект при движении мыши
-      ref.current.position.x += (mouse.x * depth) / viewport.width;
-      ref.current.position.y += (mouse.y * depth) / viewport.height;
+      // Плавное приближение текущих значений к целевым
+      smoothOffsetX.current += (targetOffsetX - smoothOffsetX.current) * 0.1;
+      smoothOffsetY.current += (targetOffsetY - smoothOffsetY.current) * 0.1;
+      smoothRotationY.current += (targetRotationY - smoothRotationY.current) * 0.1;
 
-      // Добавляем поворот по оси Y в зависимости от положения мыши
-      ref.current.rotation.y = mouse.x * 0.1 * depth; // Коэффициент 0.1 управляет амплитудой поворота
+      // Устанавливаем итоговую позицию и вращение
+      ref.current.position.set(fixedX + smoothOffsetX.current, fixedY + smoothOffsetY.current, positionZ);
+      ref.current.rotation.y = smoothRotationY.current;
     }
   });
 
   return (
-    <mesh ref={ref} position={[position[0], position[1], positionZ]}>
+    <mesh ref={ref} position={[fixedX, fixedY, positionZ]}>
       <planeGeometry args={[5, 5]} /> {/* Размер слоя */}
       <meshBasicMaterial map={texture} transparent opacity={opacity} />
     </mesh>
@@ -167,12 +190,10 @@ const ImageLayer: React.FC<ImageLayerProps> = ({ url, depth, positionZ, fixedToB
 // Основная сцена
 export const Scene: React.FC = () => {
   return (
-    <Canvas>
-      <StaticBackground url="/bg-main.png" />  {/* Статичный фоновый слой */}
-      <Background url="/bg4.png" />  {/* Анимированный фон */}
-
-      {/* Слой изображения с параллаксом */}
-      <ImageLayer url="/image.png" depth={0.5} positionZ={-0.5} fixedToBottomLeft opacity={1} />
+    <Canvas data-testid="scene" >
+      <StaticBackground img={bgStaticPNG} />
+      <Background img={bgPNG} />
+      <ImageLayer img={kotPNG} depth={0.5} positionZ={-0.5} fixedToBottomLeft opacity={1} />
     </Canvas>
   );
 };

@@ -11,9 +11,9 @@ const App: React.FC = () => {
       <Scene />
       <Details title='Kot vpn bot'>
         <div>
-        <div className='caption'>Безлимитный не отслеживаемый vpn!</div>
+        <div className='caption'>Безлимитный <br/>не отслеживаемый vpn!</div>
         <a href="https://t.me/KotVPNbot" target="_blank" rel="noopener noreferrer"  className="button">
-          <FaTelegramPlane  className="icon" />
+          <FaTelegramPlane  className="icon"  data-testid="telegram-icon"/>
           <span>Добро пожаловать в бота</span>
         </a>
   
